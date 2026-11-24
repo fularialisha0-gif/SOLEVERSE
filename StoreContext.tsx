@@ -149,6 +149,19 @@ function safeWriteLS(key: string, value: unknown) {
   }
 }
 
+function normalizeImageUrl(url: string): string {
+  return typeof url === 'string'
+    ? url.replace(/^\/src\/assets\/images\//, '/images/')
+    : url;
+}
+
+function normalizeProduct(product: Product): Product {
+  return {
+    ...product,
+    images: Array.isArray(product.images) ? product.images.map(normalizeImageUrl) : [],
+  };
+}
+
 function hydrateInitialProducts(): Product[] {
   const cached = safeReadLS<Product[] | null>(LS_KEYS.DEMO_PRODUCTS, null);
   if (!cached || !Array.isArray(cached) || cached.length === 0) {
@@ -157,12 +170,14 @@ function hydrateInitialProducts(): Product[] {
   const seedMap = new Map(INITIAL_PRODUCTS.map((p) => [p.id, p]));
   const normalized = cached.map((item) => {
     const seed = seedMap.get(item.id);
-    if (!seed) return item;
+    if (!seed) return normalizeProduct(item);
     const hasLegacyOrIncomplete =
       !item.images ||
       item.images.length < 4 ||
       item.images.some((img) => img.includes('sneaker_velocity_crimson'));
-    return hasLegacyOrIncomplete ? { ...item, images: seed.images } : item;
+    return hasLegacyOrIncomplete
+      ? { ...item, images: seed.images }
+      : normalizeProduct(item);
   });
   const cachedIds = new Set(normalized.map((p) => p.id));
   const missingSeeds = INITIAL_PRODUCTS.filter((p) => !cachedIds.has(p.id));
@@ -178,7 +193,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [storeSettings, setStoreSettings] = useState<StoreSettings>(() =>
     safeReadLS<StoreSettings>(LS_KEYS.DEMO_SETTINGS, DEFAULT_STORE_SETTINGS)
   );
-  const [cart, setCart] = useState<CartItem[]>(() => safeReadLS<CartItem[]>(LS_KEYS.CART, []));
+  const [cart, setCart] = useState<CartItem[]>(() =>
+    safeReadLS<CartItem[]>(LS_KEYS.CART, []).map((c) => ({ ...c, image: normalizeImageUrl(c.image) }))
+  );
   const [wishlist, setWishlist] = useState<string[]>(() => safeReadLS<string[]>(LS_KEYS.WISHLIST, []));
   const [orders, setOrders] = useState<Order[]>(() => safeReadLS<Order[]>(LS_KEYS.DEMO_ORDERS, []));
   const [allOrders, setAllOrders] = useState<Order[]>(() => safeReadLS<Order[]>(LS_KEYS.DEMO_ORDERS, []));
@@ -232,7 +249,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       collection(db, 'products'),
       (snap) => {
         if (!snap.empty) {
-          const list = snap.docs.map((d) => d.data() as Product);
+          const list = snap.docs.map((d) => normalizeProduct(d.data() as Product));
           setProducts(list);
         }
       },
@@ -363,7 +380,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       doc(firestore, 'carts', user.uid),
       (snap) => {
         if (snap.exists()) {
-          const items = (snap.data().items || []) as CartItem[];
+          const items = ((snap.data().items || []) as CartItem[]).map((c) => ({
+            ...c,
+            image: normalizeImageUrl(c.image),
+          }));
           setCart(items);
           safeWriteLS(LS_KEYS.CART, items);
         }
